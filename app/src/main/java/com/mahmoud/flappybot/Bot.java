@@ -10,7 +10,7 @@ final class Bot {
     static volatile boolean active = false;
 
     // Tunable from the app screen.
-    static volatile float aim = 0.62f;        // where to fly inside the gap: 0 = top edge, 1 = bottom edge
+    static volatile float aim = 0.72f;        // where to fly inside the gap: 0 = top edge, 1 = bottom edge
     static volatile float lookahead = 0.07f;  // seconds of delay to compensate for
     static volatile float minTapGap = 0.11f;  // minimum seconds between taps
 
@@ -24,20 +24,25 @@ final class Bot {
     private static float lastGapTop = -1f;
     private static float lastGapBottom;
 
+    // Jump height is learned while playing (fraction of screen height).
+    private static float jumpRise = 0.13f;
+    private static boolean measuring = false;
+    private static float tapY, minSinceTap;
+
     private static int[] rowGrey = new int[0];
     private static int[] colGreen = new int[0];
     private static boolean[] obst = new boolean[0];
 
     static void load(Context c) {
         SharedPreferences p = c.getSharedPreferences("bot", Context.MODE_PRIVATE);
-        aim = p.getFloat("aim", 0.62f);
+        aim = p.getFloat("aim2", 0.72f);
         lookahead = p.getFloat("lookahead", 0.07f);
         minTapGap = p.getFloat("minTapGap", 0.11f);
     }
 
     static void save(Context c) {
         c.getSharedPreferences("bot", Context.MODE_PRIVATE).edit()
-                .putFloat("aim", aim)
+                .putFloat("aim2", aim)
                 .putFloat("lookahead", lookahead)
                 .putFloat("minTapGap", minTapGap)
                 .apply();
@@ -46,6 +51,7 @@ final class Bot {
     static void reset() {
         prevY = -1f;
         lastGapTop = -1f;
+        measuring = false;
     }
 
     /**
@@ -104,6 +110,7 @@ final class Bot {
             }
         }
         float playerY = (float) sum / n / h;
+        float radius = Math.min(0.08f, Math.max(0.03f, n * 0.55f / h));
 
         // ---- nearest obstacle and its gap
         float gapTop = -1f, gapBottom = -1f;
@@ -161,20 +168,45 @@ final class Bot {
         prevY = playerY;
         prevT = now;
 
-        float target;
+        // learn how high one tap lifts the player
+        if (measuring) {
+            if (playerY < minSinceTap) minSinceTap = playerY;
+            if (playerY > minSinceTap + 0.01f) {
+                float rise = tapY - minSinceTap;
+                if (rise > 0.03f && rise < 0.40f) jumpRise = 0.7f * jumpRise + 0.3f * rise;
+                measuring = false;
+            }
+        }
+
+        float gTop, bottomEdge;
         if (gapTop >= 0f) {
             lastGapTop = gapTop;
             lastGapBottom = gapBottom;
-            target = gapTop + (gapBottom - gapTop) * aim;
+            gTop = gapTop;
+            bottomEdge = gapBottom;
         } else if (lastGapTop >= 0f) {
-            target = lastGapTop + (lastGapBottom - lastGapTop) * aim;
+            gTop = lastGapTop;
+            bottomEdge = lastGapBottom;
         } else {
-            target = IDLE_TARGET;
+            gTop = IDLE_TARGET - 0.15f;
+            bottomEdge = IDLE_TARGET + 0.15f;
         }
 
+        // lowest line the player may reach before it must jump
+        float lowLine = bottomEdge - radius - 0.02f;
+        // highest line from which a jump still stays under the top obstacle
+        float safeTop = gTop + radius + jumpRise + 0.015f;
+        float wanted = gTop + (bottomEdge - gTop) * aim;
+        float threshold = Math.min(lowLine, Math.max(wanted, safeTop));
+
         float predicted = playerY + vy * lookahead;
-        if (predicted > target && now - lastTap > minTapGap) {
+        boolean rising = vy < -0.05f;
+        boolean mustJump = predicted > lowLine;
+        if (predicted > threshold && (!rising || mustJump) && now - lastTap > minTapGap) {
             lastTap = now;
+            measuring = true;
+            tapY = playerY;
+            minSinceTap = playerY;
             return true;
         }
         return false;
