@@ -14,8 +14,7 @@ final class Bot {
     static volatile float lookahead = 0.07f;  // seconds of delay to compensate for
     static volatile float minTapGap = 0.11f;  // minimum seconds between taps
 
-    static final float PLAYER_X = 0.25f;      // player's horizontal position (fraction of width)
-    static final float PLAYER_BAND = 0.07f;   // half-width of the strip searched for the player
+    static final float CAP = 0.045f;          // height of the brown cap on each cactus (fraction of height)
     static final float IDLE_TARGET = 0.48f;   // height to hold when no obstacle is visible
 
     private static float prevY = -1f;
@@ -31,6 +30,7 @@ final class Bot {
 
     private static int[] rowGrey = new int[0];
     private static int[] colGreen = new int[0];
+    private static int[] colGrey = new int[0];
     private static boolean[] obst = new boolean[0];
 
     static void load(Context c) {
@@ -65,10 +65,12 @@ final class Bot {
         java.util.Arrays.fill(rowGrey, 0);
         java.util.Arrays.fill(colGreen, 0);
 
-        int x0 = Math.max(0, (int) (w * (PLAYER_X - PLAYER_BAND)));
-        int x1 = Math.min(w, (int) (w * (PLAYER_X + PLAYER_BAND)));
+        int xMax = (int) (w * 0.45f);          // the player is always in the left part
         int top = (int) (h * 0.06f);
         int bottom = (int) (h * 0.96f);
+        if (colGrey.length != w) colGrey = new int[w];
+        java.util.Arrays.fill(colGrey, 0);
+        int total = 0;
 
         for (int y = 0; y < h; y++) {
             int base = y * rowStride;
@@ -82,25 +84,30 @@ final class Bot {
                 int r = px[i] & 0xFF;
                 int g = px[i + 1] & 0xFF;
                 int b = px[i + 2] & 0xFF;
+                // cactus body (works on the night and the day background)
                 boolean green = g > r + 12 && g > b + 12;
-                boolean brown = r > b + 30 && r >= g && r > 90;
                 if (green) colGreen[x]++;
-                obst[o + x] = green || brown;
-                if (x >= x0 && x < x1 && y >= top && y < bottom) {
+                obst[o + x] = green;
+                if (x < xMax && y >= top && y < bottom) {
+                    // neutral light grey = the player's disc
                     int mx = Math.max(r, Math.max(g, b));
                     int mn = Math.min(r, Math.min(g, b));
-                    if (mn > 175 && mx - mn < 22) rowGrey[y]++;
+                    if (mx - mn <= 10 && mn >= 185 && mn <= 245) {
+                        rowGrey[y]++;
+                        colGrey[x]++;
+                        total++;
+                    }
                 }
             }
         }
 
-        // ---- player: bright grey/white disc
-        int max = 0;
-        for (int y = top; y < bottom; y++) if (rowGrey[y] > max) max = rowGrey[y];
-        if (max <= (x1 - x0) * 0.35f) {
+        // ---- player
+        if (total < w * h * 0.004f) {
             prevY = -1f;
             return false;
         }
+        int max = 0;
+        for (int y = top; y < bottom; y++) if (rowGrey[y] > max) max = rowGrey[y];
         long sum = 0;
         int n = 0;
         for (int y = top; y < bottom; y++) {
@@ -111,10 +118,21 @@ final class Bot {
         }
         float playerY = (float) sum / n / h;
         float radius = Math.min(0.08f, Math.max(0.03f, n * 0.55f / h));
+        int maxC = 0;
+        for (int x = 0; x < xMax; x++) if (colGrey[x] > maxC) maxC = colGrey[x];
+        long sumX = 0;
+        int nX = 0;
+        for (int x = 0; x < xMax; x++) {
+            if (colGrey[x] > maxC * 0.5f) {
+                sumX += x;
+                nX++;
+            }
+        }
+        float playerX = (float) sumX / nX / w;
 
         // ---- nearest obstacle and its gap
         float gapTop = -1f, gapBottom = -1f;
-        int leftLimit = Math.max(0, (int) (w * (PLAYER_X - PLAYER_BAND - 0.02f)));
+        int leftLimit = Math.max(0, (int) (w * (playerX - 0.10f)));
         float colThr = h * 0.18f;
         int first = -1;
         for (int x = leftLimit; x < w; x++) {
@@ -134,11 +152,10 @@ final class Bot {
             }
             int width = end - first + 1;
             if (width >= 2) {
-                int ya = (int) (h * 0.04f);
                 int bestStart = -1, bestLen = 0, runStart = -1;
-                for (int y = ya; y <= bottom; y++) {
+                for (int y = 0; y <= h; y++) {
                     boolean free = false;
-                    if (y < bottom) {
+                    if (y < h) {
                         int c = 0;
                         int o = y * w;
                         for (int x = first; x <= end; x++) if (obst[o + x]) c++;
@@ -154,9 +171,16 @@ final class Bot {
                         runStart = -1;
                     }
                 }
-                if (bestLen > h * 0.08f) {
-                    gapTop = (float) bestStart / h;
-                    gapBottom = (float) (bestStart + bestLen) / h;
+                if (bestLen > h * 0.12f) {
+                    // the brown caps are not green: trim them off both ends
+                    float t = (float) bestStart / h;
+                    float bt = (float) (bestStart + bestLen) / h;
+                    if (bestStart > 0) t += CAP;
+                    if (bestStart + bestLen < h) bt -= CAP;
+                    if (bt - t > 0.08f) {
+                        gapTop = t;
+                        gapBottom = bt;
+                    }
                 }
             }
         }
