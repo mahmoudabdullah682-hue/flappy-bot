@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FlappyBot</string>
+    <string name="acc_desc">FlappyBot uses this permission only to tap the screen for you while the bot is on.</string>
+</resources>
