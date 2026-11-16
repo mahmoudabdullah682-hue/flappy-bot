@@ -29,7 +29,7 @@ public class MainActivity extends Activity {
         root.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("FlappyBot (build 4)");
+        title.setText("FlappyBot (build 5)");
         title.setTextSize(26);
         root.addView(title);
 

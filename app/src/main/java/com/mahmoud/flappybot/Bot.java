@@ -30,6 +30,11 @@ final class Bot {
     private static float gravity = 2.5f;      // fraction of screen height per second^2, learned
     private static float rawVy, smoothVy;
     private static boolean hasVy = false;
+    private static boolean modelValid = false, tapPending = false;
+    private static float my, mv;
+    private static int outliers = 0;
+    private static double lastGood, prevMeasT;
+    private static float lastRadius = 0.045f, lastPlayerX = 0.22f;
 
     private static int[] rowGrey = new int[0];
     private static int[] colGreen = new int[0];
@@ -56,6 +61,9 @@ final class Bot {
         lastGapTop = -1f;
         measuring = false;
         hasVy = false;
+        modelValid = false;
+        tapPending = false;
+        outliers = 0;
     }
 
     /**
@@ -105,35 +113,42 @@ final class Bot {
             }
         }
 
-        // ---- player
-        if (total < w * h * 0.004f) {
-            prevY = -1f;
-            return false;
-        }
+        // ---- player (only trusted when the grey blob has the size of the disc;
+        //      while the background fades between night and day it can turn grey too)
         int max = 0;
         for (int y = top; y < bottom; y++) if (rowGrey[y] > max) max = rowGrey[y];
-        double sum = 0, wsum = 0;
-        int n = 0;
-        for (int y = top; y < bottom; y++) {
-            if (rowGrey[y] > max * 0.5f) n++;
-            if (rowGrey[y] > max * 0.25f) {
-                sum += (y + 0.5) * rowGrey[y];
-                wsum += rowGrey[y];
+        boolean reliable = max > 0 && total > w * h * 0.004f && total < w * h * 0.025f;
+        float measY = -1f;
+        if (reliable) {
+            double sum = 0, wsum = 0;
+            int n = 0;
+            for (int y = top; y < bottom; y++) {
+                if (rowGrey[y] > max * 0.5f) n++;
+                if (rowGrey[y] > max * 0.25f) {
+                    sum += (y + 0.5) * rowGrey[y];
+                    wsum += rowGrey[y];
+                }
+            }
+            if (n < h * 0.035f || n > h * 0.115f) {
+                reliable = false;
+            } else {
+                measY = (float) (sum / wsum / h);
+                lastRadius = Math.min(0.08f, Math.max(0.03f, n * 0.58f / h));
+                int maxC = 0;
+                for (int x = 0; x < xMax; x++) if (colGrey[x] > maxC) maxC = colGrey[x];
+                long sumX = 0;
+                int nX = 0;
+                for (int x = 0; x < xMax; x++) {
+                    if (colGrey[x] > maxC * 0.5f) {
+                        sumX += x;
+                        nX++;
+                    }
+                }
+                lastPlayerX = (float) sumX / nX / w;
             }
         }
-        float playerY = (float) (sum / wsum / h);
-        float radius = Math.min(0.08f, Math.max(0.03f, n * 0.58f / h));
-        int maxC = 0;
-        for (int x = 0; x < xMax; x++) if (colGrey[x] > maxC) maxC = colGrey[x];
-        long sumX = 0;
-        int nX = 0;
-        for (int x = 0; x < xMax; x++) {
-            if (colGrey[x] > maxC * 0.5f) {
-                sumX += x;
-                nX++;
-            }
-        }
-        float playerX = (float) sumX / nX / w;
+        float radius = lastRadius;
+        float playerX = lastPlayerX;
 
         // ---- nearest obstacle and its gap
         float gapTop = -1f, gapBottom = -1f;
@@ -193,26 +208,69 @@ final class Bot {
         // ---- control
         double now = nowNs / 1e9;
         float dt = (float) (now - prevT);
-        float vy = 0f;
-        if (prevY >= 0f && dt > 0.001f && dt < 0.25f) {
-            float raw = (playerY - prevY) / dt;
-            // learn gravity from free-fall frames (no recent tap)
-            if (hasVy && now - lastTap > 0.25) {
-                float acc = (raw - rawVy) / dt;
-                if (acc > 0.5f && acc < 12f) gravity = 0.95f * gravity + 0.05f * acc;
-            }
-            rawVy = raw;
-            vy = hasVy ? 0.5f * smoothVy + 0.5f * raw : raw;
-            smoothVy = vy;
-            hasVy = true;
-        } else {
-            hasVy = false;
-        }
-        prevY = playerY;
         prevT = now;
 
+        // simple physics model of the player; it carries us through frames we cannot read
+        if (modelValid) {
+            if (dt > 0f && dt < 0.25f) {
+                if (tapPending && now >= lastTap + lookahead) {
+                    mv = -(float) Math.sqrt(2f * gravity * jumpRise);
+                    tapPending = false;
+                }
+                mv += gravity * dt;
+                my += mv * dt;
+            } else {
+                modelValid = false;
+            }
+        }
+
+        boolean accept = false;
+        if (reliable) {
+            if (!modelValid || Math.abs(measY - my) < 0.08f || outliers >= 4) accept = true;
+            else outliers++;
+        }
+
+        float playerY, vy;
+        if (accept) {
+            outliers = 0;
+            lastGood = now;
+            float dm = (float) (now - prevMeasT);
+            if (prevY >= 0f && dm > 0.001f && dm < 0.25f) {
+                float raw = (measY - prevY) / dm;
+                // learn gravity from free-fall frames (no recent tap)
+                if (hasVy && now - lastTap > 0.25) {
+                    float acc = (raw - rawVy) / dm;
+                    if (acc > 0.5f && acc < 12f) gravity = 0.95f * gravity + 0.05f * acc;
+                }
+                rawVy = raw;
+                smoothVy = hasVy ? 0.5f * smoothVy + 0.5f * raw : raw;
+                hasVy = true;
+                mv = smoothVy;
+            } else {
+                hasVy = false;
+                if (!modelValid) mv = 0f;
+            }
+            prevY = measY;
+            prevMeasT = now;
+            my = measY;
+            modelValid = true;
+            playerY = measY;
+            vy = mv;
+        } else {
+            if (!modelValid || now - lastGood > 0.6) {
+                modelValid = false;
+                prevY = -1f;
+                hasVy = false;
+                return false;
+            }
+            prevY = -1f;
+            hasVy = false;
+            playerY = my;
+            vy = mv;
+        }
+
         // learn how high one tap lifts the player
-        if (measuring) {
+        if (measuring && accept) {
             if (playerY < minSinceTap) minSinceTap = playerY;
             float rise = tapY - minSinceTap;
             // the tap lands a little late, so wait until the player has really gone up
@@ -251,7 +309,7 @@ final class Bot {
             measuring = true;
             tapY = playerY;
             minSinceTap = playerY;
-            hasVy = false;
+            tapPending = true;
             return true;
         }
         return false;
