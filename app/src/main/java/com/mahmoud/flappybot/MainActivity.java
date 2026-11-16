@@ -29,7 +29,7 @@ public class MainActivity extends Activity {
         root.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("FlappyBot (build 3)");
+        title.setText("FlappyBot (build 4)");
         title.setTextSize(26);
         root.addView(title);
 
@@ -91,15 +91,15 @@ public class MainActivity extends Activity {
                 + "دوس عليه عشان البوت يبدأ، ودوس تاني عشان يقف.");
         root.addView(how);
 
-        addSlider(root, "مكان الطيران جوه الفتحة (قلله لو بيخبط تحت، زوده لو بيخبط فوق)",
-                0.30f, 0.90f, Bot.aim, new Setter() {
+        addSlider(root, "ميل الطيران (قلله لو بيخبط تحت، زوده لو بيخبط فوق)",
+                0.20f, 0.80f, Bot.aim, new Setter() {
                     @Override
                     public void set(float v) {
                         Bot.aim = v;
                     }
                 });
         addSlider(root, "تعويض التأخير بالثانية (زوده لو بيضغط متأخر)",
-                0.00f, 0.20f, Bot.lookahead, new Setter() {
+                0.00f, 0.25f, Bot.lookahead, new Setter() {
                     @Override
                     public void set(float v) {
                         Bot.lookahead = v;

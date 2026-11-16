@@ -47,7 +47,7 @@ public class TapService extends AccessibilityService {
         Path p = new Path();
         p.moveTo(x, y);
         GestureDescription g = new GestureDescription.Builder()
-                .addStroke(new GestureDescription.StrokeDescription(p, 0, 25))
+                .addStroke(new GestureDescription.StrokeDescription(p, 0, 8))
                 .build();
         dispatchGesture(g, null, null);
     }

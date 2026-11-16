@@ -29,7 +29,7 @@ public class CaptureService extends Service {
     static final String EXTRA_CODE = "code";
     static final String EXTRA_DATA = "data";
     private static final String CHANNEL = "flappybot";
-    private static final int SCALE = 4;
+    private static final int SCALE = 3;
 
     static volatile boolean running = false;
 
