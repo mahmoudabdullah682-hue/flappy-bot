@@ -142,6 +142,7 @@ public class CaptureService extends Service {
     public void onDestroy() {
         running = false;
         Bot.active = false;
+        Bot.saveLearned(this);
         TapService s = TapService.instance;
         if (s != null) s.showButton(false);
         if (display != null) display.release();
